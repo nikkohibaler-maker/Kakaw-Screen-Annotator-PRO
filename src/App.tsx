@@ -68,6 +68,10 @@ export default function App() {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
+  const isElectron = useMemo(() => {
+    return typeof window !== 'undefined' && window.process && (window.process as any).type === 'renderer';
+  }, []);
+
   // LocalStorage Persistence
   useEffect(() => {
     const saved = localStorage.getItem('proannotate_strokes');
@@ -468,6 +472,10 @@ export default function App() {
 
   return (
     <div className="relative w-screen h-screen select-none touch-none bg-[#121212] overflow-hidden">
+      {/* Electron Drag Region (macOS Title Bar Area) */}
+      {isElectron && (
+        <div className="fixed top-0 left-0 right-0 h-8 z-[100] window-drag pointer-events-none" style={{ WebkitAppRegion: 'drag' } as any} />
+      )}
       {/* Background Simulation */}
       <div className="absolute inset-0 bg-dots flex items-center justify-center pointer-events-none opacity-40">
         <div className="w-[85%] h-[65%] rounded-xl border border-white/5 bg-gradient-to-b from-white/5 to-transparent relative p-12 shadow-inner">
