@@ -7,8 +7,12 @@
 }
 
 @layer base {
+  html, body {
+    background-color: transparent !important;
+  }
+
   body {
-    @apply bg-[#121212] text-white overflow-hidden antialiased;
+    @apply text-white overflow-hidden antialiased;
     font-family: var(--font-sans);
   }
 

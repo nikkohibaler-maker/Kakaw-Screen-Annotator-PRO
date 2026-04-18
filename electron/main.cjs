@@ -12,6 +12,7 @@ function createWindow() {
     x,
     y,
     transparent: true,
+    backgroundColor: '#00000000',
     frame: false,
     alwaysOnTop: true,
     hasShadow: false,
@@ -29,13 +30,18 @@ function createWindow() {
   if (process.platform === 'darwin') {
     win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
     win.setAlwaysOnTop(true, 'screen-saver');
-    app.dock.hide();
+    // app.dock.hide(); // Allow dock icon so it's easier to quit via macOS menu
   }
 
   // Mouse passthrough logic
   ipcMain.on('set-ignore-mouse-events', (event, ignore, options) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     win.setIgnoreMouseEvents(ignore, options);
+  });
+
+  // Quit application logic
+  ipcMain.on('quit-app', () => {
+    app.quit();
   });
 
   // In development, load from the Vite dev server

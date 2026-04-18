@@ -27,7 +27,8 @@ import {
   Search,
   RotateCcw,
   RotateCw,
-  Download
+  Download,
+  Power
 } from 'lucide-react';
 import { DrawingTool, Point, Stroke } from './types.ts';
 
@@ -71,7 +72,10 @@ export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   const isElectron = useMemo(() => {
-    return typeof window !== 'undefined' && window.process && (window.process as any).type === 'renderer';
+    return typeof window !== 'undefined' && (
+      (window.process && (window.process as any).type === 'renderer') ||
+      navigator.userAgent.toLowerCase().includes('electron')
+    );
   }, []);
 
   const ipcRenderer = useMemo(() => {
@@ -138,6 +142,11 @@ export default function App() {
       
       if (e.shiftKey) setIsShiftPressed(true);
 
+      // Global Quit hotkey (Cmd+Q/Ctrl+Q)
+      if ((e.metaKey || e.ctrlKey) && e.key === 'q') {
+        quitApp();
+      }
+
       // Undo / Redo
       if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
         if (e.shiftKey) {
@@ -174,6 +183,12 @@ export default function App() {
     }, 100);
     return () => clearInterval(interval);
   }, [inkVanishTime]);
+
+  const quitApp = () => {
+    if (ipcRenderer) {
+      ipcRenderer.send('quit-app');
+    }
+  };
 
   const undo = () => {
     if (strokes.length === 0) return;
@@ -505,7 +520,7 @@ export default function App() {
   };
 
   return (
-    <div className={`relative w-screen h-screen select-none touch-none ${isElectron ? 'bg-transparent' : 'bg-[#121212]'} overflow-hidden`}>
+    <div className="relative w-screen h-screen select-none touch-none bg-transparent overflow-hidden">
       {/* Electron Drag Region (macOS Title Bar Area) */}
       {isElectron && (
         <div className="fixed top-0 left-0 right-0 h-8 z-[100] pointer-events-none" />
@@ -678,10 +693,19 @@ export default function App() {
         <div 
           className="w-[64px] bg-[#1c1c1e]/90 backdrop-blur-[32px] rounded-[24px] border border-white/10 shadow-[0_32px_64px_-16px_rgba(0,0,0,0.6)] flex flex-col items-center gap-0.5 py-3 ring-1 ring-white/5 transition-all duration-300 ease-in-out"
         >
-          {/* Drag Handle */}
-          <div className="w-6 h-1 flex flex-col gap-[1px] mb-2 opacity-10">
-            <div className="w-full h-[1px] bg-white rounded-full" />
-            <div className="w-full h-[1px] bg-white rounded-full" />
+          {/* Drag Handle & Quick Exit */}
+          <div className="w-full flex justify-between px-3 mb-2 items-center group/header">
+            <div className="w-6 h-1 flex flex-col gap-[1px] opacity-10">
+              <div className="w-full h-[1px] bg-white rounded-full" />
+              <div className="w-full h-[1px] bg-white rounded-full" />
+            </div>
+            <button 
+              onClick={quitApp}
+              className="opacity-0 group-hover/header:opacity-40 hover:!opacity-100 text-red-500 transition-all p-0.5"
+              title="Quit App"
+            >
+              <Power size={10} />
+            </button>
           </div>
 
           {/* Group: Drawing - ALWAYS VISIBLE */}
@@ -737,7 +761,7 @@ export default function App() {
                         }}
                         className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${eraserSize === s ? 'bg-red-500/20 border border-red-500/30' : 'hover:bg-white/5 opacity-40 hover:opacity-100'}`}
                       >
-                         <div 
+                        <div 
                           className={`rounded-full shadow-sm ${eraserSize === s ? 'bg-red-500 animate-pulse' : 'bg-white'}`}
                           style={{ width: Math.max(3, s / 6), height: Math.max(3, s / 6) }}
                         />
@@ -747,6 +771,8 @@ export default function App() {
                 )}
               </AnimatePresence>
             </div>
+
+            <ToolButton onClick={clearAll} icon={<Trash2 size={16} strokeWidth={2.5} />} tooltip="Clear All" isDanger active={false} />
 
             <div className="w-full flex flex-col items-center gap-1 mt-1 border-t border-white/5 pt-2">
                <span className="text-[6px] text-white/20 uppercase font-black tracking-widest text-center">Smart</span>
@@ -795,7 +821,7 @@ export default function App() {
                   <ActionButton onClick={undo} icon={<RotateCcw size={14} />} tooltip="Undo" disabled={strokes.length === 0} />
                   <ActionButton onClick={redo} icon={<RotateCw size={14} />} tooltip="Redo" disabled={redoStack.length === 0} />
                   <ActionButton onClick={exportAsPng} icon={<Download size={14} />} tooltip="Save PNG" />
-                  <ActionButton onClick={clearAll} icon={<Trash2 size={14} />} tooltip="Clear All" isDanger />
+                  <ActionButton onClick={quitApp} icon={<Power size={14} />} tooltip="Quit App" isDanger />
                 </div>
               </motion.div>
             )}
@@ -874,12 +900,12 @@ function ToolbarSeparator() {
   return <div className="w-8 h-[1px] bg-white/5 my-1.5 mx-auto" />;
 }
 
-function ToolButton({ active, onClick, icon, tooltip, hotkey }: { active: boolean, onClick: () => void, icon: React.ReactNode, tooltip: string, hotkey?: string }) {
+function ToolButton({ active = false, onClick, icon, tooltip, hotkey, isDanger = false }: { active?: boolean, onClick: () => void, icon: React.ReactNode, tooltip: string, hotkey?: string, isDanger?: boolean }) {
   return (
     <div className="group relative w-full flex justify-center">
         <button 
           onClick={onClick} 
-          className={`w-10 h-10 rounded-[14px] flex items-center justify-center transition-all duration-300 relative border ${active ? 'bg-white text-black border-transparent shadow-[0_4px_16px_rgba(255,255,255,0.2)]' : 'bg-transparent text-white/50 border-transparent hover:bg-white/5 hover:text-white'}`}
+          className={`w-10 h-10 rounded-[14px] flex items-center justify-center transition-all duration-300 relative border ${active ? 'bg-white text-black border-transparent shadow-[0_4px_16px_rgba(255,255,255,0.2)]' : isDanger ? 'bg-transparent text-red-400 border-transparent hover:bg-red-500/10 hover:text-red-300' : 'bg-transparent text-white/50 border-transparent hover:bg-white/5 hover:text-white'}`}
         >
             {icon}
             {active && <motion.div layoutId="active-tool" className="absolute -right-1 w-1 h-2 bg-white rounded-full" />}
