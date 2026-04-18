@@ -60,6 +60,8 @@ export default function App() {
   const [inkVanishTime, setInkVanishTime] = useState(3000); // Default 3s
   const [eraserSize, setEraserSize] = useState(40); // Default 40px
   const [magnifierPos, setMagnifierPos] = useState<Point | null>(null);
+  const [dashboardScale, setDashboardScale] = useState(1); // Future-proof scaling
+  const [isExpanded, setIsExpanded] = useState(false);
   
   // Text tool state
   const [activeTextId, setActiveTextId] = useState<string | null>(null);
@@ -71,6 +73,38 @@ export default function App() {
   const isElectron = useMemo(() => {
     return typeof window !== 'undefined' && window.process && (window.process as any).type === 'renderer';
   }, []);
+
+  const ipcRenderer = useMemo(() => {
+    if (isElectron) {
+      return (window as any).require('electron').ipcRenderer;
+    }
+    return null;
+  }, [isElectron]);
+
+  // Handle Mouse Passthrough
+  useEffect(() => {
+    if (!ipcRenderer) return;
+
+    if (currentTool === 'pointer') {
+      // In pointer mode, the canvas should let clicks through to the desktop
+      ipcRenderer.send('set-ignore-mouse-events', true, { forward: true });
+    } else {
+      // In drawing mode, the canvas captures clicks
+      ipcRenderer.send('set-ignore-mouse-events', false);
+    }
+  }, [currentTool, ipcRenderer]);
+
+  const handleToolbarMouseEnter = () => {
+    if (ipcRenderer) {
+      ipcRenderer.send('set-ignore-mouse-events', false);
+    }
+  };
+
+  const handleToolbarMouseLeave = () => {
+    if (ipcRenderer && currentTool === 'pointer') {
+      ipcRenderer.send('set-ignore-mouse-events', true, { forward: true });
+    }
+  };
 
   // LocalStorage Persistence
   useEffect(() => {
@@ -471,23 +505,11 @@ export default function App() {
   };
 
   return (
-    <div className="relative w-screen h-screen select-none touch-none bg-[#121212] overflow-hidden">
+    <div className={`relative w-screen h-screen select-none touch-none ${isElectron ? 'bg-transparent' : 'bg-[#121212]'} overflow-hidden`}>
       {/* Electron Drag Region (macOS Title Bar Area) */}
       {isElectron && (
-        <div className="fixed top-0 left-0 right-0 h-8 z-[100] window-drag pointer-events-none" style={{ WebkitAppRegion: 'drag' } as any} />
+        <div className="fixed top-0 left-0 right-0 h-8 z-[100] pointer-events-none" />
       )}
-      {/* Background Simulation */}
-      <div className="absolute inset-0 bg-dots flex items-center justify-center pointer-events-none opacity-40">
-        <div className="w-[85%] h-[65%] rounded-xl border border-white/5 bg-gradient-to-b from-white/5 to-transparent relative p-12 shadow-inner">
-          <div className="absolute top-6 left-6 text-xs text-white/20 font-sans tracking-widest uppercase">
-            System Overlay Active · M2 Optimized
-          </div>
-          <svg className="absolute inset-0 w-full h-full opacity-10" viewBox="0 0 800 400">
-             <path d="M0 300 Q 200 350, 400 200 T 800 100" fill="none" stroke="#22c55e" strokeWidth="1" />
-             <path d="M0 250 Q 250 150, 500 300 T 800 200" fill="none" stroke="#0ea5e9" strokeWidth="1" />
-          </svg>
-        </div>
-      </div>
 
       {/* Surface */}
       <div 
@@ -615,8 +637,6 @@ export default function App() {
                 transformOrigin: 'top left'
               }}
             >
-                {/* Visual Clone of the entire board */}
-                <div className="bg-dots w-screen h-screen opacity-20" />
                 <svg className="w-screen h-screen">
                    {strokes.map(s => (
                      s.tool !== 'text' && (
@@ -641,28 +661,45 @@ export default function App() {
           </div>
         )}
       </div>
-      {/* Toolbar */}
+      {/* Floating Dashboard */}
       <motion.div 
-        animate={{ x: isToolbarOpen ? 0 : -100 }}
-        className="fixed left-8 top-[8%] z-[60] flex items-center"
+        drag
+        dragMomentum={false}
+        onMouseEnter={handleToolbarMouseEnter}
+        onMouseLeave={handleToolbarMouseLeave}
+        animate={{ 
+          x: isToolbarOpen ? 0 : 84,
+          scale: dashboardScale 
+        }}
+        className="fixed right-8 top-[10%] z-[120] flex flex-row-reverse items-stretch cursor-grab active:cursor-grabbing"
+        style={{ touchAction: 'none' }}
       >
-        <div className="w-[88px] bg-[#1c1c1e]/90 backdrop-blur-[24px] rounded-[24px] border border-white/10 shadow-2xl flex flex-col items-center gap-1 overflow-y-auto max-h-[85vh] py-4 scrollbar-hide">
-          
-          {/* Group: Drawing */}
+        {/* Main Body */}
+        <div 
+          className="w-[64px] bg-[#1c1c1e]/90 backdrop-blur-[32px] rounded-[24px] border border-white/10 shadow-[0_32px_64px_-16px_rgba(0,0,0,0.6)] flex flex-col items-center gap-0.5 py-3 ring-1 ring-white/5 transition-all duration-300 ease-in-out"
+        >
+          {/* Drag Handle */}
+          <div className="w-6 h-1 flex flex-col gap-[1px] mb-2 opacity-10">
+            <div className="w-full h-[1px] bg-white rounded-full" />
+            <div className="w-full h-[1px] bg-white rounded-full" />
+          </div>
+
+          {/* Group: Drawing - ALWAYS VISIBLE */}
           <ToolbarSection label="Ink">
-            <ToolButton active={currentTool === 'pen'} onClick={() => setCurrentTool('pen')} icon={<Pencil size={20} />} tooltip="Smooth Pen (1)" />
+            <ToolButton active={currentTool === 'pen'} onClick={() => setCurrentTool('pen')} icon={<Pencil size={16} strokeWidth={2.5} />} tooltip="Smooth Pen (1)" hotkey="1" />
             
             <div className="relative w-full flex flex-col items-center">
-              <ToolButton active={currentTool === 'disappearingInk'} onClick={() => setCurrentTool('disappearingInk')} icon={<Sparkles size={20} />} tooltip="Quick Ink (3)" />
+              <ToolButton active={currentTool === 'disappearingInk'} onClick={() => setCurrentTool('disappearingInk')} icon={<Sparkles size={16} strokeWidth={2.5} />} tooltip="Vanish Ink (3)" hotkey="3" />
               
               <AnimatePresence>
                 {currentTool === 'disappearingInk' && (
                   <motion.div 
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: -10 }}
-                    className="absolute left-[80px] top-0 bg-[#1c1c1e] border border-white/10 rounded-xl p-1.5 flex flex-col gap-1 shadow-2xl z-[70]"
+                    initial={{ opacity: 0, x: 10, scale: 0.9 }}
+                    animate={{ opacity: 1, x: 0, scale: 1 }}
+                    exit={{ opacity: 0, x: 10, scale: 0.9 }}
+                    className="absolute right-[70px] top-0 bg-[#242426]/95 backdrop-blur-xl border border-white/10 rounded-2xl p-1.5 flex flex-col gap-1 shadow-2xl z-[150] min-w-[50px]"
                   >
+                    <span className="text-[7px] text-white/20 text-center font-bold uppercase mb-1">Vanish</span>
                     {[3, 5, 10, 30].map(t => (
                       <button
                         key={t}
@@ -670,7 +707,7 @@ export default function App() {
                           e.stopPropagation();
                           setInkVanishTime(t * 1000);
                         }}
-                        className={`text-[10px] font-black w-10 h-7 rounded-lg flex items-center justify-center transition-all ${inkVanishTime === t * 1000 ? 'bg-[#FFD60A] text-black shadow-lg shadow-yellow-500/20' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
+                        className={`text-[9px] font-bold h-6 rounded-lg flex items-center justify-center transition-all ${inkVanishTime === t * 1000 ? 'bg-[#FFD60A] text-black shadow-lg shadow-yellow-500/20' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
                       >
                         {t}s
                       </button>
@@ -681,15 +718,15 @@ export default function App() {
             </div>
 
             <div className="relative w-full flex flex-col items-center">
-              <ToolButton active={currentTool === 'eraser'} onClick={() => setCurrentTool('eraser')} icon={<Eraser size={20} />} tooltip="Eraser (4)" />
+              <ToolButton active={currentTool === 'eraser'} onClick={() => setCurrentTool('eraser')} icon={<Eraser size={16} strokeWidth={2.5} />} tooltip="Eraser (4)" hotkey="4" />
               
               <AnimatePresence>
                 {currentTool === 'eraser' && (
                   <motion.div 
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: -10 }}
-                    className="absolute left-[80px] top-0 bg-[#1c1c1e] border border-white/10 rounded-xl p-1.5 flex flex-col gap-1 shadow-2xl z-[70]"
+                    initial={{ opacity: 0, x: 10, scale: 0.9 }}
+                    animate={{ opacity: 1, x: 0, scale: 1 }}
+                    exit={{ opacity: 0, x: 10, scale: 0.9 }}
+                    className="absolute right-[70px] top-0 bg-[#242426]/95 backdrop-blur-xl border border-white/10 rounded-2xl p-1.5 flex flex-col gap-1 shadow-2xl z-[150]"
                   >
                     {[20, 40, 80, 120].map(s => (
                       <button
@@ -698,14 +735,11 @@ export default function App() {
                           e.stopPropagation();
                           setEraserSize(s);
                         }}
-                        className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all ${eraserSize === s ? 'bg-red-500/20 border border-red-500/50' : 'hover:bg-white/5 opacity-40 hover:opacity-100'}`}
+                        className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${eraserSize === s ? 'bg-red-500/20 border border-red-500/30' : 'hover:bg-white/5 opacity-40 hover:opacity-100'}`}
                       >
-                        <div 
-                          className={`rounded-full shadow-sm ${eraserSize === s ? 'bg-red-500' : 'bg-white'}`}
-                          style={{ 
-                            width: Math.max(4, s / 4), 
-                            height: Math.max(4, s / 4) 
-                          }}
+                         <div 
+                          className={`rounded-full shadow-sm ${eraserSize === s ? 'bg-red-500 animate-pulse' : 'bg-white'}`}
+                          style={{ width: Math.max(3, s / 6), height: Math.max(3, s / 6) }}
                         />
                       </button>
                     ))}
@@ -713,92 +747,123 @@ export default function App() {
                 )}
               </AnimatePresence>
             </div>
-          </ToolbarSection>
 
-          <ToolbarSeparator />
-
-          {/* Group: Shapes */}
-          <ToolbarSection label="Shape">
-            <ToolButton active={currentTool === 'straightLine'} onClick={() => setCurrentTool('straightLine')} icon={<Minus size={20} className="rotate-45" />} tooltip="Line (2)" />
-            <ToolButton active={currentTool === 'arrow'} onClick={() => setCurrentTool('arrow')} icon={<ArrowUpRight size={20} />} tooltip="Arrow" />
-            <ToolButton active={currentTool === 'rectangle'} onClick={() => setCurrentTool('rectangle')} icon={<Square size={20} />} tooltip="Rectangle" />
-            <ToolButton active={currentTool === 'ellipse'} onClick={() => setCurrentTool('ellipse')} icon={<Circle size={20} />} tooltip="Ellipse" />
-            <ToolButton active={currentTool === 'triangle'} onClick={() => setCurrentTool('triangle')} icon={<Triangle size={20} />} tooltip="Triangle" />
-          </ToolbarSection>
-
-          <ToolbarSeparator />
-
-          {/* Group: Annotation */}
-          <ToolbarSection label="Utility">
-            <ToolButton active={currentTool === 'text'} onClick={() => setCurrentTool('text')} icon={<Type size={20} />} tooltip="Text Tool" />
-            <ToolButton active={currentTool === 'magnifier'} onClick={() => setCurrentTool('magnifier')} icon={<Search size={20} />} tooltip="Zoom Lens" />
-            <ToolButton active={currentTool === 'pointer'} onClick={() => setCurrentTool('pointer')} icon={<MousePointer2 size={20} />} tooltip="Select (5)" />
-          </ToolbarSection>
-
-          <ToolbarSeparator />
-
-          {/* Group: Actions */}
-          <ToolbarSection label="State">
-            <div className="grid grid-cols-2 gap-1 w-full px-2">
-              <ActionButton onClick={undo} icon={<RotateCcw size={16} />} tooltip="Undo (⌘Z)" disabled={strokes.length === 0} />
-              <ActionButton onClick={redo} icon={<RotateCw size={16} />} tooltip="Redo (⇧⌘Z)" disabled={redoStack.length === 0} />
-              <ActionButton onClick={exportAsPng} icon={<Download size={16} />} tooltip="Export PNG" />
-              <ActionButton onClick={clearAll} icon={<Trash2 size={16} />} tooltip="Clear All (⌘K)" />
+            <div className="w-full flex flex-col items-center gap-1 mt-1 border-t border-white/5 pt-2">
+               <span className="text-[6px] text-white/20 uppercase font-black tracking-widest text-center">Smart</span>
+               <button 
+                onClick={() => setSmartShapeEnabled(!smartShapeEnabled)}
+                className={`w-8 h-4 rounded-full transition-all relative ${smartShapeEnabled ? 'bg-green-500' : 'bg-white/10'}`}
+              >
+                <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full shadow-sm transition-all ${smartShapeEnabled ? 'left-4.5' : 'left-0.5'}`} />
+              </button>
             </div>
           </ToolbarSection>
 
           <ToolbarSeparator />
 
-          {/* Settings / Controls */}
-          <div className="flex flex-col items-center gap-4 py-2 w-full px-3">
-             <div className="flex flex-col items-center gap-2">
-                <span className="text-[9px] text-white/20 tracking-[0.2em] font-black uppercase">Smart</span>
-                <button 
-                  onClick={() => setSmartShapeEnabled(!smartShapeEnabled)}
-                  className={`w-10 h-5 rounded-full transition-all relative ${smartShapeEnabled ? 'bg-[#32D74B]' : 'bg-white/10'}`}
-                >
-                  <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow-sm transition-all ${smartShapeEnabled ? 'left-5.5' : 'left-0.5'}`} />
-                </button>
-             </div>
-             
-             <div className="w-full flex flex-col gap-3">
-               <div className="flex flex-col items-center gap-1">
-                  <span className="text-[9px] text-white/20 tracking-[0.2em] font-black uppercase">Alpha</span>
-                  <input type="range" min="0.1" max="1" step="0.05" value={strokeOpacity} onChange={e => setStrokeOpacity(Number(e.target.value))} className="w-full h-1 bg-white/10 rounded-full appearance-none accent-[#0a84ff]" />
-               </div>
+          {/* EXPANDABLE SECTION */}
+          <AnimatePresence>
+            {isExpanded && (
+              <motion.div 
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                className="w-full flex flex-col items-center overflow-hidden"
+              >
+                {/* Group: Shapes */}
+                <ToolbarSection label="Shapes">
+                  <ToolButton active={currentTool === 'straightLine'} onClick={() => setCurrentTool('straightLine')} icon={<Minus size={16} strokeWidth={3} className="rotate-45" />} tooltip="Line (2)" hotkey="2" />
+                  <ToolButton active={currentTool === 'arrow'} onClick={() => setCurrentTool('arrow')} icon={<ArrowUpRight size={16} strokeWidth={2.5} />} tooltip="Arrow" />
+                  <ToolButton active={currentTool === 'rectangle'} onClick={() => setCurrentTool('rectangle')} icon={<Square size={15} strokeWidth={2.5} />} tooltip="Rect" />
+                  <ToolButton active={currentTool === 'ellipse'} onClick={() => setCurrentTool('ellipse')} icon={<Circle size={15} strokeWidth={2.5} />} tooltip="Circle" />
+                  <ToolButton active={currentTool === 'triangle'} onClick={() => setCurrentTool('triangle')} icon={<Triangle size={15} strokeWidth={2.5} />} tooltip="Triangle" />
+                </ToolbarSection>
 
-               <div className="w-full h-8 rounded-lg border border-white/10 relative shadow-inner overflow-hidden" style={{ backgroundColor: strokeColor }}>
-                 <input type="color" value={strokeColor} onChange={e => setStrokeColor(e.target.value)} className="absolute inset-0 opacity-0 cursor-pointer w-full h-full" />
-               </div>
+                <ToolbarSeparator />
+
+                {/* Group: Annotation */}
+                <ToolbarSection label="Tools">
+                  <ToolButton active={currentTool === 'text'} onClick={() => setCurrentTool('text')} icon={<Type size={16} strokeWidth={2.5} />} tooltip="Text Tool" />
+                  <ToolButton active={currentTool === 'magnifier'} onClick={() => setCurrentTool('magnifier')} icon={<Search size={16} strokeWidth={2.5} />} tooltip="Zoom Lens" />
+                  <ToolButton active={currentTool === 'pointer'} onClick={() => setCurrentTool('pointer')} icon={<MousePointer2 size={16} strokeWidth={2.5} />} tooltip="Select (5)" hotkey="5" />
+                </ToolbarSection>
+
+                <ToolbarSeparator />
+
+                {/* Group: Actions */}
+                <div className="grid grid-cols-2 gap-1 w-full px-2 mb-2">
+                  <ActionButton onClick={undo} icon={<RotateCcw size={14} />} tooltip="Undo" disabled={strokes.length === 0} />
+                  <ActionButton onClick={redo} icon={<RotateCw size={14} />} tooltip="Redo" disabled={redoStack.length === 0} />
+                  <ActionButton onClick={exportAsPng} icon={<Download size={14} />} tooltip="Save PNG" />
+                  <ActionButton onClick={clearAll} icon={<Trash2 size={14} />} tooltip="Clear All" isDanger />
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Style Controls - ALWAYS VISIBLE OR MOVED? Let's keep them visible for intuitiveness */}
+          <div className="w-full flex flex-col items-center gap-3 pt-1 pb-2 px-2 border-t border-white/5">
+             <div className="flex flex-col items-center gap-1.5 w-full">
+                <div 
+                  className="w-10 h-10 rounded-full border-2 border-white/20 relative shadow-inner overflow-hidden group/color hover:scale-105 active:scale-95 transition-all" 
+                  style={{ backgroundColor: strokeColor }}
+                >
+                  <input type="color" value={strokeColor} onChange={e => setStrokeColor(e.target.value)} className="absolute inset-0 opacity-0 cursor-pointer w-full h-full" />
+                </div>
+             </div>
+
+             <div className="flex flex-col items-center gap-1.5 w-full h-20 bg-white/5 rounded-2xl py-2">
+                <span className="text-[7px] text-white/20 tracking-widest font-black uppercase">Size</span>
+                 <input 
+                  type="range" 
+                  min="2" 
+                  max="24" 
+                  step="1" 
+                  value={lineWidth} 
+                  onChange={e => setLineWidth(Number(e.target.value))} 
+                  className="w-12 h-1 bg-white/10 rounded-full appearance-none accent-white cursor-pointer -rotate-90 origin-center mt-6" 
+                />
              </div>
           </div>
+
+          <ToolbarSeparator />
+
+          {/* Expansion Toggle Button */}
+          <button 
+            onClick={() => setIsExpanded(!isExpanded)}
+            className={`w-full h-10 flex items-center justify-center transition-all border-t border-white/5 hover:bg-white/5 rounded-b-[24px] ${isExpanded ? 'text-white/40' : 'text-[#0a84ff]'}`}
+          >
+            {isExpanded ? (
+              <div className="flex flex-col items-center">
+                <ChevronLeft size={16} className="rotate-90" />
+                <span className="text-[7px] font-bold uppercase tracking-widest -mt-1">Less</span>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center group animate-pulse">
+                <span className="text-[7px] font-black opacity-60 group-hover:opacity-100 uppercase tracking-tighter mb-0.5">More</span>
+                <ChevronRight size={14} className="rotate-90" />
+              </div>
+            )}
+          </button>
         </div>
 
-        <button onClick={() => setIsToolbarOpen(!isToolbarOpen)} className="ml-3 p-2 bg-[#1c1c1e]/60 rounded-r-2xl border border-l-0 border-white/10 text-white/20 hover:text-white transition-all shadow-xl backdrop-blur-md">
-          {isToolbarOpen ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
+        {/* Toggle Tab */}
+        <button 
+          onClick={() => setIsToolbarOpen(!isToolbarOpen)} 
+          className="self-center -mr-2 p-1.5 bg-[#1c1c1e]/90 backdrop-blur-xl rounded-full border border-white/10 text-white/40 hover:text-white transition-all shadow-2xl z-[130] hover:scale-110 active:scale-95"
+        >
+          {isToolbarOpen ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
         </button>
       </motion.div>
-
-      {/* Footer Info */}
-      <div className="fixed bottom-6 right-8 bg-black/30 backdrop-blur-md px-5 py-2.5 rounded-full border border-white/5 flex items-center gap-4 z-50">
-        <div className="flex items-center gap-2 text-[10px] tracking-widest font-bold text-[#8e8e93]">
-          <span className="text-white/40">SYSTEM STATUS:</span>
-          <span className="text-green-500">READY</span>
-        </div>
-        <div className="h-4 w-[1px] bg-white/10" />
-        <div className="text-[10px] text-white/40 font-mono tracking-tighter">
-          MEM: {(strokes.length * 0.1).toFixed(1)}KB / STACK: {strokes.length}
-        </div>
-      </div>
     </div>
   );
 }
 
 function ToolbarSection({ label, children }: { label: string, children: React.ReactNode }) {
   return (
-    <div className="flex flex-col items-center gap-1.5 w-full py-1">
-      <span className="text-[9px] text-white/10 tracking-[0.15em] font-black uppercase mb-1">{label}</span>
-      <div className="flex flex-col gap-1 w-full items-center">
+    <div className="flex flex-col items-center gap-1 w-full py-1.5 px-2">
+      <span className="text-[7.5px] text-white/15 tracking-[0.2em] font-black uppercase mb-1">{label}</span>
+      <div className="flex flex-col gap-0.5 w-full items-center">
         {children}
       </div>
     </div>
@@ -806,29 +871,44 @@ function ToolbarSection({ label, children }: { label: string, children: React.Re
 }
 
 function ToolbarSeparator() {
-  return <div className="w-10 h-[1px] bg-white/5 my-2 mx-auto" />;
+  return <div className="w-8 h-[1px] bg-white/5 my-1.5 mx-auto" />;
 }
 
-function ToolButton({ active, onClick, icon, tooltip }: { active: boolean, onClick: () => void, icon: React.ReactNode, tooltip: string }) {
+function ToolButton({ active, onClick, icon, tooltip, hotkey }: { active: boolean, onClick: () => void, icon: React.ReactNode, tooltip: string, hotkey?: string }) {
   return (
-    <div className="group relative">
-        <button onClick={onClick} className={`w-12 h-12 rounded-xl flex items-center justify-center transition-all duration-200 ${active ? 'bg-[#0a84ff] text-white shadow-lg shadow-blue-500/40' : 'bg-transparent text-white/60 hover:bg-white/5 hover:text-white'}`}>
+    <div className="group relative w-full flex justify-center">
+        <button 
+          onClick={onClick} 
+          className={`w-10 h-10 rounded-[14px] flex items-center justify-center transition-all duration-300 relative border ${active ? 'bg-white text-black border-transparent shadow-[0_4px_16px_rgba(255,255,255,0.2)]' : 'bg-transparent text-white/50 border-transparent hover:bg-white/5 hover:text-white'}`}
+        >
             {icon}
+            {active && <motion.div layoutId="active-tool" className="absolute -right-1 w-1 h-2 bg-white rounded-full" />}
         </button>
-        <div className="absolute left-full ml-4 px-3 py-1.5 bg-[#1c1c1e] text-white text-[10px] font-bold tracking-widest rounded-lg shadow-2xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none border border-white/10 z-[100] uppercase">
+        
+        {/* Pro Tooltip */}
+        <div className="absolute right-[85%] mr-4 px-2 py-1.5 bg-[#1c1c1e] text-white text-[9px] font-bold tracking-widest rounded-lg shadow-2xl opacity-0 group-hover:opacity-100 transition-all pointer-events-none border border-white/10 z-[200] uppercase flex items-center gap-2 whitespace-nowrap -translate-x-1 group-hover:translate-x-0">
             {tooltip}
+            {hotkey && <span className="bg-white/10 px-1 py-0.5 rounded text-[8px] text-white/40">{hotkey}</span>}
         </div>
     </div>
   );
 }
 
-function ActionButton({ onClick, icon, tooltip, disabled = false }: { onClick: () => void, icon: React.ReactNode, tooltip: string, disabled?: boolean }) {
+function ActionButton({ onClick, icon, tooltip, disabled = false, isDanger = false }: { onClick: () => void, icon: React.ReactNode, tooltip: string, disabled?: boolean, isDanger?: boolean }) {
   return (
     <div className="group relative">
-        <button onClick={onClick} disabled={disabled} className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all ${disabled ? 'opacity-20 cursor-not-allowed' : 'text-white/40 hover:bg-white/5 hover:text-white'}`}>
+        <button 
+          onClick={onClick} 
+          disabled={disabled} 
+          className={`w-9 h-9 rounded-[12px] flex items-center justify-center transition-all ${disabled ? 'opacity-10 cursor-not-allowed' : isDanger ? 'text-red-400 hover:bg-red-500/10 hover:text-red-300' : 'text-white/30 hover:bg-white/5 hover:text-white'}`}
+        >
             {icon}
         </button>
-        {!disabled && <div className="absolute left-full ml-4 px-3 py-1.5 bg-[#1c1c1e] text-white text-[10px] font-bold tracking-widest rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none border border-white/10 z-[100] uppercase">{tooltip}</div>}
+        {!disabled && (
+          <div className="absolute right-[85%] mr-4 px-2 py-1.5 bg-[#1c1c1e] text-white text-[9px] font-bold tracking-widest rounded-lg opacity-0 group-hover:opacity-100 transition-all pointer-events-none border border-white/10 z-[200] uppercase -translate-x-1 group-hover:translate-x-0">
+            {tooltip}
+          </div>
+        )}
     </div>
   );
 }

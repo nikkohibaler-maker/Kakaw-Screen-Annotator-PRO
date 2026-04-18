@@ -2,6 +2,8 @@
   "name": "kakaw-screen-annotator-pro",
   "private": true,
   "version": "1.0.0",
+  "description": "Professional high-performance screen annotation tool for macOS.",
+  "author": "Nikko Hibaler",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
@@ -11,8 +13,8 @@
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
     "electron:dev": "electron .",
-    "electron:build": "npm run build && electron-builder build --mac --dmg",
-    "build:dmg": "npm run build && electron-builder build --mac --dmg"
+    "electron:build": "npm run build && electron-builder --mac",
+    "build:dmg": "npm run build && electron-builder --mac"
   },
   "build": {
     "appId": "com.kakaw.annotator.pro",
