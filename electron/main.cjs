@@ -1,12 +1,20 @@
-const { app, BrowserWindow, ipcMain, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, Menu, Tray, nativeImage } = require('electron');
 const path = require('path');
 
+let win;
+let tray;
+
 function createWindow() {
+  if (win) {
+    if (win.isMinimized()) win.restore();
+    win.focus();
+    return;
+  }
   const primaryDisplay = screen.getPrimaryDisplay();
   const { width, height, x, y } = primaryDisplay.bounds;
 
   const isDev = !app.isPackaged;
-  const win = new BrowserWindow({
+  win = new BrowserWindow({
     width,
     height,
     x,
@@ -56,6 +64,55 @@ function createWindow() {
 
 app.whenReady().then(() => {
   createWindow();
+
+  // Create Tray Icon
+  const icon = nativeImage.createEmpty(); // Transparent dummy icon
+  tray = new Tray(icon);
+  tray.setTitle('✎'); // Use a pen emoji/symbol for the tray title
+  
+  const contextMenu = Menu.buildFromTemplate([
+    { label: 'ProAnnotate', enabled: false },
+    { type: 'separator' },
+    { label: 'Toggle Toolbar', click: () => win.webContents.send('toggle-toolbar') },
+    { label: 'Clear All', click: () => win.webContents.send('clear-canvas') },
+    { label: 'Undo', click: () => win.webContents.send('undo-stroke') },
+    { type: 'separator' },
+    { label: 'Quit ProAnnotate', click: () => app.quit() }
+  ]);
+  
+  tray.setContextMenu(contextMenu);
+
+  // Also update the main App Menu for macOS
+  const template = [
+    {
+      label: 'ProAnnotate',
+      submenu: [
+        { label: 'About ProAnnotate', role: 'about' },
+        { type: 'separator' },
+        { label: 'Toggle Toolbar', accelerator: 'CmdOrCtrl+T', click: () => win.webContents.send('toggle-toolbar') },
+        { type: 'separator' },
+        { label: 'Quit', accelerator: 'Cmd+Q', click: () => app.quit() }
+      ]
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { label: 'Undo', accelerator: 'CmdOrCtrl+Z', click: () => win.webContents.send('undo-stroke') },
+        { label: 'Redo', accelerator: 'Shift+CmdOrCtrl+Z', click: () => win.webContents.send('redo-stroke') },
+        { type: 'separator' },
+        { label: 'Clear All', accelerator: 'CmdOrCtrl+K', click: () => win.webContents.send('clear-canvas') }
+      ]
+    },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'toggleDevTools' }
+      ]
+    }
+  ];
+  const menu = Menu.buildFromTemplate(template);
+  Menu.setApplicationMenu(menu);
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
